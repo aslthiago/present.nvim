@@ -11,9 +11,68 @@ local create_floating_window = function(config, enter)
   return { buf = buf, win = win }
 end
 
+--- Default executor for Lua code
+---@param block present.Block
+local execute_lua_code = function(block)
+  -- Override the default print function, to capture all the output
+  -- Store the original print function
+  local original_print = print
+  local output = {}
 
-M.setup = function()
-  -- nothing
+  -- Redefine the print function
+  print = function(...)
+    local args = { ... }
+    local message = table.concat(vim.tbl_map(tostring, args), "\t")
+    table.insert(output, message)
+  end
+
+  -- Call the provided function
+  local chunk = loadstring(block.body)
+  pcall(function()
+    if not chunk then
+      table.insert(output, "<<< BROKEN CODE >>>")
+    else
+      chunk()
+    end
+
+    return output
+  end)
+
+  -- Restore the original print function
+  print = original_print
+
+  return output
+end
+
+-- `:echo executable("python")`
+M.create_system_executor = function(program)
+  return function(block)
+    local tempfile = vim.fn.tempname()
+    vim.fn.writefile(vim.split(block.body, "\n"), tempfile)
+    local result = vim.system({ program, tempfile }, { text = true }):wait()
+    return vim.split(result.stdout, "\n")
+  end
+end
+
+local execute_js_code = M.create_system_executor("node")
+local execute_python_code = M.create_system_executor("python")
+
+local options = {
+  executors = {
+    lua = execute_lua_code,
+    javascript = execute_js_code,
+    python = execute_python_code,
+  }
+}
+
+M.setup = function(opts)
+  opts = opts or {}
+  opts.executors = opts.executors or {}
+  opts.executors.lua = opts.executors.lua or execute_lua_code
+  opts.executors.javascript = opts.executors.lua or M.create_system_executor("node")
+  opts.executors.python = opts.executors.lua or M.create_system_executor("python")
+
+  options = opts
 end
 
 ---@class present.Slides
@@ -216,46 +275,26 @@ M.start_presentation = function(opts)
     local slide = state.parsed.slides[state.current_slide]
     local block = slide.blocks[1]
 
-    -- if block ~= nil then
-    --   vim.print(block.body)
-    -- end
-
     if not block then
       print("No blocks on this page")
       return
     end
 
-    -- Override the default print function, to capture all the output
-    -- Store the original print function
-    local original_print = print
+    local executor = options.executors[block.language]
+    if not executor then
+      print("No valid executor for this language")
+      return
+    end
 
     -- Table to capture print messages
-    local output = { "", "# Code", "", "```" .. block.language }
+    local output = { "# Code", "", "```" .. block.language }
     vim.list_extend(output, vim.split(block.body, "\n"))
     table.insert(output, "```")
 
-    -- Redefine the print function
-    print = function(...)
-      local args = { ... }
-      local message = table.concat(vim.tbl_map(tostring, args), "\t")
-      table.insert(output, message)
-    end
-
-    -- Call the provided function
-    local chunk = loadstring(block.body)
-    pcall(function()
-      table.insert(output, "")
-      table.insert(output, "# Output")
-      table.insert(output, "")
-      if not chunk then
-        table.insert(output, "<<< BROKEN CODE >>>")
-      else
-        chunk()
-      end
-    end)
-
-    -- Restore the original print function
-    print = original_print
+    table.insert(output, "")
+    table.insert(output, "# Output")
+    table.insert(output, "")
+    vim.list_extend(output, executor(block))
 
     local buf = vim.api.nvim_create_buf(false, true)
     local temp_width = math.floor(vim.o.columns * 0.8)

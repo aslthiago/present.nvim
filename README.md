@@ -2,12 +2,28 @@
 
 This is a plugin for presenting markdown files.
 
-# Features
+# Features: Lua
 
 Can execute code in lua blocks, when you have them in a slide.
 
 ```lua
 print("Hello, world!", 37)
+```
+
+# Features: JavaScript
+
+Can execute code in javascript blocks, when you have them in a slide.
+
+```javascript
+console.log({ field: true, other: false });
+```
+
+# Features: Python
+
+Can execute code in javascript blocks, when you have them in a slide.
+
+```python
+print("Hello, Python")
 ```
 
 # Usage
